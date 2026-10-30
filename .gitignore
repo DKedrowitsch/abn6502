@@ -1,5 +1,9 @@
 *.o
 *.bin
+bridge/build-*/
+bridge/firmware/third_party/
+__pycache__/
+*.pyc
 build/userlisting.txt
 build/listing.txt
 .DS_Store

@@ -6,6 +6,7 @@
 //If you have the RF24 library installed on a Raspberry Pi this will compile with: g++ -Ofast -Wall -pthread -I/usr/local/include/RF24/..  -L/usr/local/lib bootload.cpp -lrf24 -o bootload
 
 #include <cstdlib>
+#include <cstring>
 #include <iostream>
 #include <fstream>
 #include <sstream>
@@ -63,9 +64,7 @@ int main(int argc, char** argv)
 {
 	signal(SIGINT, interrupt_handler); // Ctrl-c interrupt handler
 	fstream *file;
-	//uint8_t *packets; // buffer to store all of the packets
 	char *filename = NULL;
-	uint8_t *packets; // buffer to store all of the packets
 	int errorcount = 0;
 	int c;
 	while ((c = getopt (argc, argv, "s:d:nmhD")) != -1)
@@ -93,8 +92,13 @@ int main(int argc, char** argv)
 		}
 	}
 	// Open the file
-	file = new fstream(filename, fstream::in);
-	if(!file)
+	if(filename == NULL)
+	{
+		cout << "Error: No source file specified.\n";
+		return 6;
+	}
+	file = new fstream(filename, fstream::in | fstream::binary);
+	if(!file->is_open())
 	{
 		cout << "Could not open the file.\n";
 		return 6;
@@ -114,19 +118,20 @@ int main(int argc, char** argv)
 		uint8_t first[32];
 		memset(&first, '\0', sizeof(first));
 		first[1] = '1';
-		uint32_t filesize = getFilesize(filename);
+		size_t filesize = getFilesize(filename);
 		if(filesize == 0)
 		{
 			cout << "Error: Will not transmit an empty file!\n";
 			return 6;
 		}
 
-		if(filesize > 65536) {
-			cout << "Error: 64k is maximum file size.\n";
+		if(filesize > 65535) {
+			cout << "Error: 65535 bytes is the protocol maximum.\n";
                         return 6;
 		}
 
-		memcpy(first+2, &filesize, 2);
+		first[2] = filesize & 0xff;
+		first[3] = (filesize >> 8) & 0xff;
 		cout << "Attempting to establish connection...";
 		cout.flush();
 		 while(interrupt_flag == 0)
@@ -164,63 +169,63 @@ int main(int argc, char** argv)
 		// num_payload_bytes we need an extra packet
 		if (filesize % num_payload_bytes != 0)
 			total_num_pkts += 1;
-		printf("Filesize: %d\n", filesize);
+		printf("Filesize: %zu\n", filesize);
 		printf("Total Number of Packets: %d\n", total_num_pkts);
 		// Initalize the array we'll be transmitting
 		char packet[32];
 		memset(&packet, '\0', 32);
 
-		// Things we'll need later:
-		int eof = 0;
 		uint16_t special_ctr = 1; // This IDs the data pkts. Starts at 1, 0 is reserved for special packets
-
-		// Store all the packets in a buffer addressed by special_ctr
-		// TODO: don't store entire file in memory, instead use fseek
-		packets = (uint8_t*)malloc(num_payload_bytes * (total_num_pkts+1));
+		size_t bytes_read = 0;
 
 		cout << "Beginning Transmission.\n";
-		// Read the entire file and store it into the packets array
 
-		while(eof==0 && interrupt_flag == 0)
+		while(special_ctr <= total_num_pkts && interrupt_flag == 0)
 		{
 			// Transmit normal data packets
 			memset(packet, '\0', 32);
-			memcpy(packet, &special_ctr, 2);
-			for(int i = 0 + num_header_bytes; i < 32; i++)
+			packet[0] = special_ctr & 0xff;
+			packet[1] = (special_ctr >> 8) & 0xff;
+			size_t bytes_this_packet = filesize - bytes_read;
+			if(bytes_this_packet > num_payload_bytes)
+				bytes_this_packet = num_payload_bytes;
+			file->read(packet + num_header_bytes, bytes_this_packet);
+			if(static_cast<size_t>(file->gcount()) != bytes_this_packet)
 			{
-				file->get(packet[i]);
-				if(!*file)
-				{
-						cout << "Hit EOF!\n";
-					eof = 1;
-					break;
-				}
+				cout << "Error: Source file ended during transmission.\n";
+				return 6;
 			}
-		memcpy(packets + (num_payload_bytes * special_ctr), &packet[num_header_bytes], num_payload_bytes);
 
-		int x;
-		for (x = 0;x<32; x++) {
-                printf("%02x ", packet[x]);
-                };
-		int y;
-                for (y = 2;y<32; y++) {
-                if(packet[y] != 0x0a) printf("%c", packet[y]);
-                };
+			int x;
+			for (x = 0;x<32; x++) {
+				printf("%02x ", packet[x]);
+			};
+			int y;
+			for (y = 2;y<32; y++) {
+				if(packet[y] != 0x0a) printf("%c", packet[y]);
+			};
 
-		cout << "\n";
+			cout << "\n";
 
 
 			if(radio.write(&packet, 32))
 			{
 					cout << "  Sent!\n";
 					usleep(40000); //This can be waaaaaaay smaller. We're not aiming for performance here though.
+					bytes_read += bytes_this_packet;
 					special_ctr++;
 
 			} else	{
 					cout << "  Failed. Restarting...\n";
 					sleep(1);
-					radio.write(first, sizeof(first));
+					if(!radio.write(first, sizeof(first)))
+					{
+						cout << "  Restart control packet failed.\n";
+						return 7;
+					}
 					special_ctr = 1;
+					bytes_read = 0;
+					file->clear();
 					file->seekg(0);
 			}
 
@@ -229,6 +234,4 @@ int main(int argc, char** argv)
 		//uint8_t last[32];
 		//memset(&last, '\0', sizeof(last));
 		//radio.write(&last, sizeof(last));
-		free(packets);
-
 }

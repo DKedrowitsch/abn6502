@@ -149,6 +149,8 @@ LOADTIMEOUT = TAPEVARS+14
 MSGBUF = TAPEVARS+15
 ;+32bytes == To
 RF24REGS = MSGBUF+32
+RF_FLAGS = RF24REGS+32
+RF_AUTORUN = %00000001
 
 uservia = PORTB
 mosi  = %10000000
@@ -270,20 +272,25 @@ bne gtgm
 jmp nomsg; No msg received
 gtgm:
 jsr getmessage
+bcs validmessage
+jmp nomsg
+validmessage:
 
 lda MSGBUF
-bne datapacket  ; Check for control message
+bne datapacket  ; Control messages use the complete $00,$31 signature.
 lda MSGBUF+1
 cmp #$31 ; Trust but verify
 beq ctrlmsg
-jsr initrf24 ; Junk package. Reset radio.
-jmp nomsg
+jmp datapacket
 
 ctrlmsg:
 lda MSGBUF+2
 sta SLB ; Data size low byte
 lda MSGBUF+3
 sta SHB ; Data size high byte
+lda MSGBUF+4
+and #RF_AUTORUN
+sta RF_FLAGS
   jsr PRIMM
   .asciiz "Receiving $"
   lda SHB
@@ -292,7 +299,6 @@ sta SHB ; Data size high byte
   jsr printbyte
   jsr PRIMM
   .asciiz " bytes. \n"
-  inc SHB
   lda #0
   sta SVP
   lda #USERLANDH
@@ -300,6 +306,12 @@ sta SHB ; Data size high byte
   jmp main
 
 datapacket:
+
+; Ignore data unless a non-zero-length transfer is active.
+lda SLB
+ora SHB
+bne getmsg
+jmp nomsg
 
 getmsg:
 ;inc $d2 ; Debug
@@ -317,15 +329,17 @@ inc SVP
 bne nnhb
 inc SVPH
 nnhb:
-dec SLB
-bne movealong
+lda SLB
+bne declow
 dec SHB
+declow:
+dec SLB
+lda SLB
+ora SHB
 beq txdone ; 0 bytes left - All done!
 movealong:
-dec SHB
 lda SHB
 jsr printbyte
-inc SHB
 lda SLB
 jsr printbyte
 jsr PRIMM
@@ -349,6 +363,11 @@ txdone:
     sta kb_rptr ; Reset the keyboard pointers here.
     sta kb_wptr
     sta USERLANDP
+    lda RF_FLAGS
+    and #RF_AUTORUN
+    beq manualrun
+    jmp run
+manualrun:
     jsr PRIMM
     .asciiz "\nData loaded into RAM at $"
     LDA #USERLANDH
@@ -1674,11 +1693,22 @@ there:
     gmillis:
 
         inc MILLIS
-        bne t1_irq_exit
+        bne heartbeat
         inc MILLIS+1
         dec LOADTIMEOUT
+    heartbeat:
+        lda MILLIS
+        and #$3f
+        bne t1_irq_exit
+        bit ACR ; Do not disturb CTRL while T1 is generating tape output.
+        bmi t1_irq_exit
+        lda MILLIS
+        asl ; Move the 256 ms phase bit from bit 6 to CTRL7.
+        and #$80
+        ora #$09 ; Keep video enabled with VRAM based at $0800.
+        sta CTRL
     t1_irq_exit:
-    jmp exitirq
+        jmp exitirq
 
 ;    cb1_IRQ:
 ;        dec kbbit
@@ -2811,6 +2841,13 @@ rts
     jsr rw_reg
     sta RF24REGS+$11;$81 ; Overwrite P0 payload length location in mem
 
+   cmp #32 ; This protocol always uses complete 32-byte payloads.
+   beq validpayload
+   jsr initrf24
+   clc
+   rts
+
+   validpayload:
    ldy #0
    lda PORTB
    and #%11111101 ; Set CS Low
@@ -2832,6 +2869,7 @@ rts
    ldx #$27 ; Clear RX_DR
    lda #$40
    jsr rw_reg
+   sec
    rts
 
    ;  Wait for keypress subroutine -

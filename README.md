@@ -23,6 +23,11 @@ Video about the wireless bootloader:
  <img src="http://img.youtube.com/vi/NABU7gQDtcs/mqdefault.jpg" alt="Watch the video" width="240px" height="auto" border="10" />
 </a>
 
+Current wireless-loader documentation:
+
+- [ABN6502 ROM loader, RF protocol, building and use](WIRELESS_LOADER.md)
+- [CH32V203 USB-to-nRF24 bridge firmware and Linux uploader](bridge/README.md)
+
 Check out the NEW project on HackADay if you want to read more and see some pretty pictures :)
 
 https://hackaday.io/project/184725-abn6502-sbc-r1
@@ -32,7 +37,7 @@ For R1 I got rid of the Padauk MCU without increasing the chip count!
 # Build instructions:
 
 1) Send gerber files from /hardware to your favorite board house (see "Getting a PCB" below) (or get a board from [my store](https://www.imania.dk/index.php?currency=EUR&cPath=204&sort=5a&language=en)) 
-2) Build the firmware using assemble.sh (macOS/Linux) - this will also try to burn the main ROM using Minipro. Dependencies: [CC65] (https://github.com/cc65/cc65) and a way to burn the ROM's.
+2) Build the firmware with ca65/ld65 from [CC65](https://github.com/cc65/cc65). `assemble.sh` also invokes Firestarter ROM programming and Raspberry Pi SSH/SCP deployment, so inspect it before use. `WIRELESS_LOADER.md` contains build-only commands.
 3) Source the IC's - the spirit of this project is to contribute as little as possible to the global IC shortage and get used chips locally or from Ebay/AliExpress/etc.
 4) Burn the ROMs. I use a TL866II Plus variant for the actual ROMs.
 5) Solder away. If you can solder 0805 components(poorly), you should be fine. Some optional components (the microUSB connector, the 3v3 regulator, and the RF-module) require a bit more skill.  
@@ -40,17 +45,16 @@ For R1 I got rid of the Padauk MCU without increasing the chip count!
 7) Enjoy!
 
 Optional:
-Setup SSH keys with a Raspberry Pi, connect an nRF24L01+ compatible module to it and compile the wireless bootloader code in /software_linux
+Setup SSH keys with a Raspberry Pi, connect an nRF24L01+ compatible module to it and compile the sender in `/software_linux`. Alternatively, use the documented CH32V203 USB bridge from an ordinary Linux PC.
 
-Also optional:
-Microsoft BASIC can be enabled by cloning the msbasic Github repo into the same folder you cloned this repo.
+Microsoft BASIC build dependency:
+Microsoft BASIC is currently enabled in `abn6502rom.s`, so its source is required for the current build. Clone it into the repository:
 
-> git clone https://github.com/mist64/msbasic.git
+> git clone https://github.com/mist64/msbasic.git msbasic
 
-Then uncomment ;BASIC := 1 (Remove the ";") and run assemble.sh - this will let you run BASIC by pressing F4.
-To change settings for BASIC, values can be changed in defines_abn6502.s
+This allows BASIC to be entered by pressing F4. Its settings are in `defines_abn6502.s`.
 
-Also, please note that the current code assumes VRAM starts at $0800 rather than the default $2000 in the schematic - resistors will have pads for configuring in the next build, but for now it requires jumpers.
+The current ROM uses VRAM at `$0800`. A normally assembled Revision 2 board already selects that mapping through its default resistor population; no additional VRAM jumper change is required.
 
 License: Attribution-NonCommercial 4.0 International (CC BY-NC 4.0) https://creativecommons.org/licenses/by-nc/4.0/
 
@@ -75,4 +79,3 @@ You can use these affiliate links to get a board for $2 and also get $54 worth o
 
 And in case you also want to order a 3D-printed case you can use this link. 
 How to Get a $7 3D Printing Coupon: [https://3d.jlcpcb.com/?from=Anders3DP](https://jlc3dp.com/?from=Anders_N)
-
